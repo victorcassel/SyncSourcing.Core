@@ -1,92 +1,86 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace SyncSourcing.PoC1.SyncedCache;
 
-// --- 1. THE EVENT (The immutable record of what happened) ---
 public record PriceUpdated(Guid ProductId, decimal NewPrice, int Version, DateTime Timestamp);
 
-// --- 2. THE DOMAIN OBJECT (The Cache / Managed State) ---
 public class Product
 {
     public Guid Id { get; init; } = Guid.NewGuid();
-    public decimal Price { get; private set; }
-    
-    // The "Gatekeeper": Sequence number within this specific aggregate
+    private decimal _price;
+    public decimal Price => _price; 
     private int _version = 0;
     public int Version => _version;
 
-    // The Sync-Sourcing Core Logic:
-    // Atomic Compare-and-Swap (CAS) to update State and generate Event in "sync"
+    public Product(decimal initialPrice) => _price = initialPrice;
+
     public bool TryUpdatePrice(decimal newPrice, int expectedVersion, out PriceUpdated? @event)
     {
         @event = null;
         int nextVersion = expectedVersion + 1;
 
-        // ATOMIC GATEKEEPER:
-        // Only updates _version to nextVersion if current value is exactly expectedVersion.
-        // This mirrors: UPDATE Product SET Version = 6 WHERE Id = @Id AND Version = 5;
         if (Interlocked.CompareExchange(ref _version, nextVersion, expectedVersion) == expectedVersion)
         {
-            // The Gate is open! Update the local state (The Cache)
-            this.Price = newPrice;
-
-            // Create the event to be stored
+            _price = newPrice;
             @event = new PriceUpdated(this.Id, newPrice, nextVersion, DateTime.UtcNow);
             return true;
         }
-
-        return false; // Concurrency conflict!
+        return false;
     }
 }
 
-// --- 3. THE DEMO PROGRAM ---
 class Program
 {
-    // A simple thread-safe list to simulate our "Event Store"
     private static readonly ConcurrentBag<PriceUpdated> _eventLog = new();
 
     static async Task Main(string[] args)
     {
-        Console.WriteLine("=== PoC1: Atomic Sync-Sourcing (In-Memory) ===\n");
-
-        var product = new Product { Price = 10.0m };
-        Console.WriteLine($"Initial State: Price={product.Price}, Version={product.Version}");
-
-        // SIMULATION: Two different users try to update the price at the exact same time
-        Console.WriteLine("\n--- Racing two simultaneous updates ---");
-
+        Console.WriteLine("=== PoC1: The Sync-Sourcing Grand Prix ===");
+        var product = new Product(10.0m);
         int currentVersion = product.Version;
+        int contestantCount = 20;
 
-        var task1 = Task.Run(() => TrySaveChange(product, 15.0m, currentVersion, "User A"));
-        var task2 = Task.Run(() => TrySaveChange(product, 20.0m, currentVersion, "User B"));
+        Console.WriteLine($"Starting Race with {contestantCount} users. Version is {currentVersion}.");
+        Console.WriteLine("3... 2... 1... GO!\n");
 
-        await Task.WhenAll(task1, task2);
+        // Prepare 20 contestants
+        var tasks = Enumerable.Range(1, contestantCount).Select(i => 
+            Task.Run(() => {
+                // Small random jitter so they don't hit the CPU in the exact same nanosecond 
+                // based on array order, making it truly random.
+                Thread.Sleep(new Random().Next(1, 10)); 
+                return TrySave(product, 10.0m + i, currentVersion, $"User {i:00}");
+            })
+        );
 
-        Console.WriteLine("\n--- Final Results ---");
+        var results = await Task.WhenAll(tasks);
+
+        // Summary
+        var winner = results.FirstOrDefault(r => r.Success);
+        Console.WriteLine("\n--- Race Over ---");
+        if (winner != null)
+            Console.WriteLine($"WINNER: {winner.Name} (Set price to {winner.Price})");
+        
+        Console.WriteLine($"LOSERS: {results.Count(r => !r.Success)} users were rejected by the Atomic Gatekeeper.");
         Console.WriteLine($"Final Cache State: Price={product.Price}, Version={product.Version}");
-        Console.WriteLine($"Total Events in Log: {_eventLog.Count}");
-        foreach (var ev in _eventLog)
-        {
-            Console.WriteLine($" - Event: {ev.NewPrice} (v{ev.Version}) at {ev.Timestamp:HH:mm:ss.fff}");
-        }
     }
 
-    static void TrySaveChange(Product product, decimal newPrice, int versionAtStart, string userName)
+    // Helper record to capture the result of a race participant
+    record RaceResult(string Name, bool Success, decimal Price);
+
+    static RaceResult TrySave(Product product, decimal newPrice, int versionAtStart, string userName)
     {
-        if (product.TryUpdatePrice(newPrice, versionAtStart, out var @event))
-        {
-            // Because TryUpdatePrice was atomic, we are GUARANTEED that 
-            // the Cache is updated and we are the only one who got this Event.
+        bool success = product.TryUpdatePrice(newPrice, versionAtStart, out var @event);
+        if (success) {
             _eventLog.Add(@event!);
-            Console.WriteLine($"[SUCCESS] {userName} updated price to {newPrice}");
+            // We only print the success to keep the window clean
+            Console.WriteLine($"[!] {userName} reached the CPU first and WON.");
         }
-        else
-        {
-            Console.WriteLine($"[CONFLICT] {userName} failed to update. Version {versionAtStart} was already changed.");
-        }
+        return new RaceResult(userName, success, newPrice);
     }
 }
