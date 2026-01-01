@@ -38,4 +38,4 @@ sequenceDiagram
     Note over Service: Logic triggers Recalculation
     Service->>Store: Persist(TotalAmountUpdated)
     Note over State: State.TotalNeedsRecalculation = false
-    ```
+```
