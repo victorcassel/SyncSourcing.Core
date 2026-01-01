@@ -4,8 +4,6 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC1.SyncedCache", "src\PoC1.SyncedCache\PoC1.SyncedCache.csproj", "{6EF8ABE0-DE74-F7F7-6024-AC117C698F40}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC1.BasicEventSourcing", "src\PoC1.BasicEventSourcing\PoC1.BasicEventSourcing.csproj", "{89FD8910-E37E-473E-9E3E-AF8BA57762F4}"
 EndProject
 Global
