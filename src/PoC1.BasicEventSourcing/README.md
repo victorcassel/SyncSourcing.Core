@@ -27,29 +27,31 @@ Instead of updating the total price automatically inside an "AddItem" event, we 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as User / Identity Provider
+    participant U as User / System
     participant S as Cart Service
     participant M as Event Store Manager
     participant St as ShoppingCart (State)
 
-    Note over U, St: Phase 1: Identity & GDPR (Sensitive)
+    U->>S: CreateCart(Guid)
+    S->>M: AddEvent(CartCreated)
+    Note right of St: State initialized with ID
+
     U->>S: Authenticate(Name, Email)
     S->>M: AddEvent(UserAuthenticated)
+    
     U->>S: CollectInfo(ID Number, Address)
     S->>M: AddEvent(UserInfoCollected)
-    Note right of St: CustomerName & ID stored in State
+    Note right of St: Customer info added to State
 
-    Note over U, St: Phase 2: Transactional Flow
     U->>S: AddItem("Laptop")
     S->>M: AddEvent(ItemAdded)
-    Note right of St: TotalNeedsRecalculation = true
+    Note right of St: Item added, TotalNeedsRecalculation = true
     
-    Note over S: Internal Logic triggers Recalculation
+    Note over S: Logic triggers Recalculation
     S->>M: AddEvent(TotalAmountUpdated)
-    Note right of St: TotalNeedsRecalculation = false
+    Note right of St: TotalAmount set, TotalNeedsRecalculation = false
 
-    Note over U, St: Phase 3: Modifications
-    U->>S: RemoveItem(Guid)
+    U->>S: RemoveItem(item2Id)
     S->>M: AddEvent(ItemRemoved)
-    Note right of St: Item removed from list via Replay
+    Note right of St: Item removed from list
 ```
