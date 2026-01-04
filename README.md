@@ -8,14 +8,14 @@ This project explores a solution for high-scale systems where "Replay Latency" i
 ### Key Innovations:
 * **Hybrid Gatekeeping:** Concurrency is managed in L1 memory, while L2 handles persistent "Shadowing."
 * **D-Sharding Architecture:** The design supports horizontal scaling by allowing different nodes or threads to own specific ID-shards in memory.
-* **Atomic Batch Sourcing:** Minimizes database roundtrips by using conditional SQL logic (`changes()` or `UPSERT`) to sync state and log simultaneously.
-* **The Epsilon Strategy:** A pragmatic approach that acknowledges domain maturity as a journey. The cache-first model allows for "Ad-hoc Corrections," treating modeling gaps as an error epsilon that trends toward zero. This creates a feedback loop ideal for future Machine Learning optimization.
+* **Update-First Batch Sourcing:** Minimizes database overhead by prioritizing `UPDATE` operations over `INSERT`. Using the `changes()` logic, we sync state and log simultaneously in a single atomic SQL roundtrip.
+* **The Epsilon Strategy:** A pragmatic approach acknowledging that domain maturity is a journey. The cache-first model allows for "Ad-hoc Corrections," treating modeling gaps as an error epsilon that trends toward zero. This creates a feedback loop ideal for future **Machine Learning** optimization.
 
 
 
 ---
 
-## 📦 Stage-by-Stage Evolution
+## 📦 The 3 Stages of Evolution
 
 ### 1. PoC 1: Basic Event Sourcing
 * **Strategy:** Replay history to build state ($O(n)$).
@@ -23,11 +23,11 @@ This project explores a solution for high-scale systems where "Replay Latency" i
 
 ### 2. PoC 2: Synced Cache Sourcing
 * **Strategy:** Introduce an In-Memory Gatekeeper.
-* **Focus:** Achieving $O(1)$ state access and implementing a "Grand Prix" race simulation to demonstrate optimistic concurrency protection.
+* **Focus:** Achieving $O(1)$ state access and implementing a "Grand Prix" race simulation to demonstrate optimistic concurrency protection in memory.
 
 ### 3. PoC 3: Hybrid Shadow-Persistence (Current)
 * **Strategy:** L1 Memory Cache + L2 SQL Shadow.
-* **Focus:** Implementing a single-roundtrip persistence model where the database acts as a reliable, passive shadow of the high-speed memory state.
+* **Focus:** Implementing a high-efficiency persistence model where the database acts as a reliable, passive shadow of the high-speed memory state.
 
 
 
@@ -36,22 +36,34 @@ This project explores a solution for high-scale systems where "Replay Latency" i
 ## 🏗 System Standards
 
 ### Deliverables
-* **Client Solutions:** Command-line simulators for concurrent race conditions.
-* **Integrations & APIs:** `HybridEventStore` providing atomic L1/L2 synchronization.
-* **Internal Tools:** SQL Schema for persistent state (Cache) and Event History (Log).
+> Tangible artifacts and interfaces provided by this architecture.
+
+* **Client Solutions:** Console-based "Race" simulators for each stage.
+* **Integrations & APIs:** `HybridEventStore` providing atomic L1/L2 synchronization and a decoupled `IMessagePublisher`.
+* **Internal Tools:** SQL Schema for persistent state (Cache) and chronological Event History (Log).
 
 ### Business Data
-* **Scope:** Real-time In-memory state, persistent Shadow state, and the immutable Event Log.
-* **Persistence:** SQLite (`SyncSourcing.db`) using the "Batch Sourcing" pattern.
+* **Scope:** Real-time In-memory active state, persistent Shadow state, and the immutable Event Log.
+* **Persistence Strategy:** Optimized **Update-First** shadowing to minimize database hot-path latency.
 * **Source of Truth:** The Event Log (long-term audit) / Memory Cache (real-time concurrency).
 * **Retention:** Events are retained indefinitely for legal auditability.
 
-### Events (Business Flows)
-> This section describes the atomic sequence of data within the Hybrid Store.
+### Events (Business Logic Flow)
+> The atomic sequence of data within the Hybrid Store.
 
-* ◀️ **SUB `CommandReceived`**: The system receives a request. It performs an immediate L1 Memory version check to prevent processing stale data.
-* ▶️ **PUB `StateShadowed`**: Upon L1 success, the state is "Shadowed" to the L2 SQL Cache via an atomic batch update.
-* ▶️ **PUB `EventArchived`**: The business fact is permanently archived in the Event Log and broadcast to the message bus for downstream consumers.
+* ◀️ **SUB `CommandReceived`**: Request received. System performs an immediate L1 Memory version check.
+* ▶️ **PUB `StateShadowed`**: State is "Shadowed" to the L2 SQL Cache via an atomic batch (Update-First logic).
+* ▶️ **PUB `EventArchived`**: Upon successful persistence, the fact is archived in the Log and broadcast to the message bus for downstream consumers.
+
+
+
+---
+
+## 🛠 Tech Stack
+* **Runtime:** .NET 8
+* **Database:** SQLite (Persistent Shadow Store)
+* **Data Access:** Dapper (High-performance Micro-ORM)
+* **Concurrency:** Hybrid Optimistic Concurrency Control (OCC)
 
 ---
 

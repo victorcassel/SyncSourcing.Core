@@ -80,7 +80,7 @@ public class HybridEventStore
         EventMetadata meta, 
         Func<ShoppingCart, ShoppingCart> applyFunc)
     {
-        // ◀️ [SUB] Command Received
+        // ◀️ [SUB] Command Received & L1 Check
         var state = await GetCart(cartId);
         int currentVersion = state?.Version ?? 0;
 
@@ -89,17 +89,22 @@ public class HybridEventStore
 
         var newState = applyFunc(state ?? new ShoppingCart { Id = cartId });
 
-        // ▶️ [PUB] State Shadowed (L2)
+        // ▶️ [PUB] State Shadowed (L2 Optimized Batch)
         using var db = new SqliteConnection(_connectionString);
         await db.OpenAsync();
 
         var sqlBatch = @"
-            INSERT INTO Carts (Id, Version, IsCancelled, Total) 
-            VALUES (@Id, @Version, @IsCancelled, @Total)
-            ON CONFLICT(Id) DO UPDATE SET 
-                Version = excluded.Version, IsCancelled = excluded.IsCancelled, Total = excluded.Total
-            WHERE Carts.Version = @ExpectedVersion;
+            -- Try Update first
+            UPDATE Carts 
+            SET Version = @Version, IsCancelled = @IsCancelled, Total = @Total 
+            WHERE Id = @Id AND Version = @ExpectedVersion;
 
+            -- Try Insert only if no rows were updated and we expected a new record
+            INSERT INTO Carts (Id, Version, IsCancelled, Total)
+            SELECT @Id, @Version, @IsCancelled, @Total
+            WHERE (SELECT changes()) = 0 AND @ExpectedVersion = 0;
+
+            -- Record the event only if state changed
             INSERT INTO CartEvents (CartId, EventType, Payload, Metadata)
             SELECT @Id, @Type, @Payload, @Meta
             WHERE (SELECT changes()) = 1;";
@@ -113,14 +118,11 @@ public class HybridEventStore
         if (affectedRows >= 1) 
         {
             _l1Cache[cartId] = newState;
-            
-            // ▶️ [PUB] Event Archived & Published
             _publisher.Publish(eventType, payload);
-            
             return new CommandResult(true, $"[SUCCESS] {meta.UserId} Synced v{newState.Version}");
         }
 
-        return new CommandResult(false, $"[L2 ERROR] {meta.UserId}: Persistence mismatch.");
+        return new CommandResult(false, $"[L2 ERROR] Concurrency violation or record already exists.");
     }
 }
 
