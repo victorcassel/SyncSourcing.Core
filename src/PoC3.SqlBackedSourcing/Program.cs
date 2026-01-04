@@ -10,12 +10,27 @@ using System.Text.Json;
 
 namespace SyncSourcing.PoC3.SqlBackedSourcing;
 
+// --- ARCHITECTURAL STANDARDS: MESSAGING ---
+public interface IMessagePublisher
+{
+    void Publish(string eventType, object payload);
+}
+
+public class ConsoleMessagePublisher : IMessagePublisher
+{
+    public void Publish(string eventType, object payload)
+    {
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"   ▶️ [PUB] {eventType} broadcasted to Bus.");
+        Console.ResetColor();
+    }
+}
+
 // --- INFRASTRUCTURE: GUID HANDLER ---
 public class GuidTypeHandler : SqlMapper.TypeHandler<Guid>
 {
     public override void SetValue(IDbDataParameter parameter, Guid value) 
         => parameter.Value = value.ToString().ToUpper();
-
     public override Guid Parse(object value) 
         => Guid.Parse(value.ToString() ?? Guid.Empty.ToString());
 }
@@ -28,12 +43,17 @@ public record ShoppingCart(Guid Id, int Version, bool IsCancelled, decimal Total
 }
 public record CommandResult(bool Success, string Message);
 
-// --- INFRASTRUCTURE: HYBRID EVENT STORE ---
+// --- HYBRID EVENT STORE ---
 public class HybridEventStore
 {
     private readonly string _connectionString = "Data Source=SyncSourcing.db";
-    // L1 Cache: The primary gatekeeper
     private readonly ConcurrentDictionary<Guid, ShoppingCart> _l1Cache = new();
+    private readonly IMessagePublisher _publisher;
+
+    public HybridEventStore(IMessagePublisher publisher)
+    {
+        _publisher = publisher;
+    }
 
     public async Task InitializeDatabase()
     {
@@ -46,16 +66,10 @@ public class HybridEventStore
 
     public async Task<ShoppingCart?> GetCart(Guid id)
     {
-        // 1. Check L1 Cache first (Memory)
         if (_l1Cache.TryGetValue(id, out var cached)) return cached;
-
-        // 2. L1 Miss: Check L2 (SQL)
         using var db = new SqliteConnection(_connectionString);
         var persistent = await db.QueryFirstOrDefaultAsync<ShoppingCart>("SELECT * FROM Carts WHERE Id = @id", new { id });
-        
-        // 3. Hydrate L1 if found
         if (persistent != null) _l1Cache[id] = persistent;
-        
         return persistent;
     }
 
@@ -66,18 +80,16 @@ public class HybridEventStore
         EventMetadata meta, 
         Func<ShoppingCart, ShoppingCart> applyFunc)
     {
-        // 1. PRIMARY GATEKEEPER: Check L1 Cache Version
-        var state = await GetCart(cartId); // Hydrates L1 if needed
+        // ◀️ [SUB] Command Received
+        var state = await GetCart(cartId);
         int currentVersion = state?.Version ?? 0;
 
         if (meta.ExpectedVersion != currentVersion)
             return new CommandResult(false, $"[L1 CONFLICT] {meta.UserId}: Expected v{meta.ExpectedVersion}, found v{currentVersion}");
 
-        // 2. APPLY DOMAIN LOGIC
         var newState = applyFunc(state ?? new ShoppingCart { Id = cartId });
 
-        // 3. PERSISTENT SHADOW UPDATE (L2)
-        // We use the same Batch logic to ensure L2 stays in sync
+        // ▶️ [PUB] State Shadowed (L2)
         using var db = new SqliteConnection(_connectionString);
         await db.OpenAsync();
 
@@ -100,12 +112,15 @@ public class HybridEventStore
 
         if (affectedRows >= 1) 
         {
-            // 4. UPDATE L1 CACHE on successful L2 persistence
             _l1Cache[cartId] = newState;
-            return new CommandResult(true, $"[SUCCESS] {meta.UserId} (L1 + L2 Synced) v{newState.Version}");
+            
+            // ▶️ [PUB] Event Archived & Published
+            _publisher.Publish(eventType, payload);
+            
+            return new CommandResult(true, $"[SUCCESS] {meta.UserId} Synced v{newState.Version}");
         }
 
-        return new CommandResult(false, $"[L2 SHADOW ERROR] {meta.UserId}: Persistence mismatch.");
+        return new CommandResult(false, $"[L2 ERROR] {meta.UserId}: Persistence mismatch.");
     }
 }
 
@@ -114,24 +129,23 @@ class Program
 {
     static async Task Main()
     {
-        var store = new HybridEventStore();
+        var publisher = new ConsoleMessagePublisher();
+        var store = new HybridEventStore(publisher);
+        
         await store.InitializeDatabase();
         var cartId = Guid.NewGuid();
         
-        Console.WriteLine("=== PoC 3: Hybrid Sync-Sourcing (L1 Memory + L2 Shadow DB) ===\n");
+        Console.WriteLine("=== PoC 3: Hybrid Sync-Sourcing (With Messaging) ===\n");
 
-        // Initialization
         await store.TryPersistEvent(cartId, "CartCreated", new { }, new EventMetadata(Guid.NewGuid(), "System", 0), s => s with { Version = 1 });
         var initial = await store.GetCart(cartId);
-        Console.WriteLine($"INITIALIZED: Cart {cartId} in L1 & L2 (v{initial!.Version})\n");
 
-        // The Race: 10 workers hitting L1 first
         var workers = new List<Task<CommandResult>>();
         for (int i = 1; i <= 10; i++)
         {
             int id = i;
             workers.Add(Task.Run(() => store.TryPersistEvent(
-                cartId, "Update", new { i }, new EventMetadata(Guid.NewGuid(), $"Worker-{id:D2}", initial.Version), 
+                cartId, "StatusUpdated", new { Reason = "Race" }, new EventMetadata(Guid.NewGuid(), $"Worker-{id:D2}", initial!.Version), 
                 s => s with { Version = s.Version + 1 })));
         }
 
@@ -144,6 +158,6 @@ class Program
         Console.ResetColor();
 
         var final = await store.GetCart(cartId);
-        Console.WriteLine($"\nFINAL STATE: Version {final!.Version} (Verified in L1 Memory)");
+        Console.WriteLine($"\nFINAL STATE: Version {final!.Version}");
     }
 }
