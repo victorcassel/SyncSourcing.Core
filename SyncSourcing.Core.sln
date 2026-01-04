@@ -6,6 +6,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC1.BasicEventSourcing", "src\PoC1.BasicEventSourcing\PoC1.BasicEventSourcing.csproj", "{89FD8910-E37E-473E-9E3E-AF8BA57762F4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC2.SyncedCacheSourcing", "src\PoC2.SyncedCacheSourcing\PoC2.SyncedCacheSourcing.csproj", "{A5086E0E-626D-4B22-9BDD-4CF9D161500D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -16,12 +18,17 @@ Global
 		{89FD8910-E37E-473E-9E3E-AF8BA57762F4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{89FD8910-E37E-473E-9E3E-AF8BA57762F4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{89FD8910-E37E-473E-9E3E-AF8BA57762F4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A5086E0E-626D-4B22-9BDD-4CF9D161500D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5086E0E-626D-4B22-9BDD-4CF9D161500D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5086E0E-626D-4B22-9BDD-4CF9D161500D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5086E0E-626D-4B22-9BDD-4CF9D161500D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{89FD8910-E37E-473E-9E3E-AF8BA57762F4} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{A5086E0E-626D-4B22-9BDD-4CF9D161500D} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {D1D4DBA4-C2C8-4D17-A0CE-21274FE55A4C}
