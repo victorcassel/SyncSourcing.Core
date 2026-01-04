@@ -1,40 +1,70 @@
-# SyncSourcing Core: An Architectural Evolution
+# SyncSourcing Core: High-Performance Architectural Evolution
 
-Welcome to the **SyncSourcing Core** project. This repository is a step-by-step architectural journey exploring the evolution of Event Sourcing into a pragmatic, high-performance model called "Sync-Sourcing."
+This repository demonstrates the evolution of state management from traditional **Event Sourcing** to a high-performance, persistent model called **"Sync-Sourcing."**
 
-## Project Philosophy: The Epsilon Strategy
-The project is built on the belief that domain modeling is an iterative process. By using a **Cache-First** strategy, we allow for "Ad-hoc Corrections" to rescue the state when unforeseen edge cases occur. This creates a "mathematical epsilon" of error that gradually trends toward zero as the domain model matures and captures all system events.
+## 🏆 Portfolio Summary: The Hybrid Shadow-Persistence Model
+In modern high-scale systems (like retail or finance), traditional Event Sourcing often suffers from "Replay Latency." This project explores a solution where we treat an **In-Memory Cache (L1)** as the primary Gatekeeper for concurrency and a **Database (L2)** as a persistent Shadow.
+
+### Why Sync-Sourcing?
+* **D-Sharding Ready:** By moving the version-check to memory, we enable horizontal scaling where different nodes/threads own specific ID-shards.
+* **The Epsilon Strategy:** We acknowledge that domain models are iterative. Our "Cache-First" approach allows for pragmatic "Ad-hoc Corrections," treating modeling gaps as a mathematical epsilon that trends toward zero as the system matures.
+* **Single-Roundtrip Persistence:** We minimize database overhead by batching the State-Update and Event-Log into a single atomic SQL operation.
 
 
-
-## The Roadmap: 3 Stages of Sourcing
-
-| Stage | Focus | State Management | Performance |
-| :--- | :--- | :--- | :--- |
-| **PoC 1** | Basic Event Sourcing | Replay from Log | $O(n)$ |
-| **PoC 2** | Synced Cache Sourcing | In-Memory Synced Cache | $O(1)$ |
-| **PoC 3** | Persistent Batch Sourcing | SQL Atomic Batching | $O(1)$ + Persistent |
 
 ---
 
-### 📦 PoC 1: Basic Event Sourcing
-The foundation. Demonstrates how to reconstruct state by replaying a chronological log of business facts. 
-* **Key Concept:** Separation of Business Data from Traceability Metadata.
+## 📦 The 3 Stages of Evolution
 
-### 📦 PoC 2: Synced Cache Sourcing
-Introduces the **Gatekeeper Pattern**. By maintaining a thread-safe in-memory cache, we eliminate the need for costly replays while adding optimistic concurrency protection.
-* **Key Concept:** Version-based conflict resolution.
+### 1. PoC 1: Basic Event Sourcing
+**Focus:** The Foundation.
+* **Strategy:** Replay history to build state ($O(n)$).
+* **Innovation:** Separation of pure Domain Data from Traceability Metadata. Establishing a standardized event schema.
 
-### 📦 PoC 3: Persistent Batch Sourcing
-The production blueprint. Moves the logic to a physical SQL store using a **Single Roundtrip** approach. It leverages database atomicity to ensure the Cache and the Log are never out of sync.
-* **Key Concept:** SQL-level conditional execution (`changes()` logic).
+### 2. PoC 2: Synced Cache Sourcing
+**Focus:** Performance & Concurrency.
+* **Strategy:** Introduce an In-Memory Gatekeeper.
+* **Innovation:** $O(1)$ state access. Introduction of a "Grand Prix" race simulation to prove optimistic concurrency via version-tracking.
+
+### 3. PoC 3: Hybrid Shadow-Persistence (Current)
+**Focus:** Production-Grade Scaling.
+* **Strategy:** L1 Memory Cache + L2 SQL Shadow.
+* **Innovation:** Uses SQL Batching (`changes()` logic) to sync the persistent cache and the event log in a single roundtrip. Memory stays the "Hot" truth; SQL stays the "Cold" persistent truth.
+
+
 
 ---
 
-## Getting Started
-To explore the evolution, it is recommended to run the projects in order. Each folder contains its own `Program.cs` and a dedicated README with specific technical details.
+## 🛠 Tech Stack
+* **Runtime:** .NET 8
+* **Database:** SQLite (Persistent Shadow Store)
+* **Data Access:** Dapper (High-performance Micro-ORM)
+* **Concurrency:** Hybrid Optimistic Concurrency Control (OCC)
 
+---
+
+## 🏗 System Standards
+
+### Deliverables
+> The tangible services provided by this architecture.
+
+* **Client Solutions:** Console-based "Race" simulators for each stage.
+* **Integrations & APIs:** `HybridEventStore` providing atomic persistence.
+* **Internal Tools:** SQL Schema for State Cache and Event Log.
+
+### Business Data
+* **Primary Data:** Current State (Synced Cache) + Business Event History (Source of Truth).
+* **Storage:** SQL Server / SQLite (`SyncSourcing.db`).
+* **Retention:** Events are kept indefinitely (Audit/Legal); Cache is persistent but rebuildable.
+
+### Events (Business Flows)
+◀️ **SUB** `CommandReceived` -> L1 Memory Version Check.  
+▶️ **PUB** `StateShadowed` -> Batch SQL Update to L2.  
+▶️ **PUB** `EventArchived` -> Written to Event Log.
+
+---
+
+## How to Run
+Each PoC is a standalone executable. Navigate to the desired folder and run:
 ```bash
-# Example: Running the Persistent Grand Prix
-cd src/PoC3.SqlBackedSourcing
 dotnet run

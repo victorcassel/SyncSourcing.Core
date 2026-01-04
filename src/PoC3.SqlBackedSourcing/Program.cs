@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
@@ -21,47 +22,41 @@ public class GuidTypeHandler : SqlMapper.TypeHandler<Guid>
 
 // --- DOMAIN LAYER ---
 public record EventMetadata(Guid CorrelationId, string? UserId, int ExpectedVersion);
-
 public record ShoppingCart(Guid Id, int Version, bool IsCancelled, decimal Total)
 {
     public ShoppingCart() : this(Guid.Empty, 0, false, 0) { }
 }
-
 public record CommandResult(bool Success, string Message);
 
-// --- INFRASTRUCTURE LAYER: THE SQL ENGINE ---
-public class SqlEventStore
+// --- INFRASTRUCTURE: HYBRID EVENT STORE ---
+public class HybridEventStore
 {
     private readonly string _connectionString = "Data Source=SyncSourcing.db";
+    // L1 Cache: The primary gatekeeper
+    private readonly ConcurrentDictionary<Guid, ShoppingCart> _l1Cache = new();
 
     public async Task InitializeDatabase()
     {
+        SqlMapper.AddTypeHandler(new GuidTypeHandler());
         using var db = new SqliteConnection(_connectionString);
         await db.OpenAsync();
-
-        await db.ExecuteAsync(@"
-            CREATE TABLE IF NOT EXISTS Carts (
-                Id TEXT PRIMARY KEY,
-                Version INT,
-                IsCancelled BOOLEAN,
-                Total DECIMAL
-            );");
-
-        await db.ExecuteAsync(@"
-            CREATE TABLE IF NOT EXISTS CartEvents (
-                SequenceId INTEGER PRIMARY KEY AUTOINCREMENT,
-                CartId TEXT,
-                EventType TEXT,
-                Payload TEXT,
-                Metadata TEXT
-            );");
+        await db.ExecuteAsync("CREATE TABLE IF NOT EXISTS Carts (Id TEXT PRIMARY KEY, Version INT, IsCancelled BOOLEAN, Total DECIMAL);");
+        await db.ExecuteAsync("CREATE TABLE IF NOT EXISTS CartEvents (SequenceId INTEGER PRIMARY KEY AUTOINCREMENT, CartId TEXT, EventType TEXT, Payload TEXT, Metadata TEXT);");
     }
 
     public async Task<ShoppingCart?> GetCart(Guid id)
     {
+        // 1. Check L1 Cache first (Memory)
+        if (_l1Cache.TryGetValue(id, out var cached)) return cached;
+
+        // 2. L1 Miss: Check L2 (SQL)
         using var db = new SqliteConnection(_connectionString);
-        return await db.QueryFirstOrDefaultAsync<ShoppingCart>(
-            "SELECT * FROM Carts WHERE Id = @id", new { id });
+        var persistent = await db.QueryFirstOrDefaultAsync<ShoppingCart>("SELECT * FROM Carts WHERE Id = @id", new { id });
+        
+        // 3. Hydrate L1 if found
+        if (persistent != null) _l1Cache[id] = persistent;
+        
+        return persistent;
     }
 
     public async Task<CommandResult> TryPersistEvent(
@@ -71,102 +66,73 @@ public class SqlEventStore
         EventMetadata meta, 
         Func<ShoppingCart, ShoppingCart> applyFunc)
     {
+        // 1. PRIMARY GATEKEEPER: Check L1 Cache Version
+        var state = await GetCart(cartId); // Hydrates L1 if needed
+        int currentVersion = state?.Version ?? 0;
+
+        if (meta.ExpectedVersion != currentVersion)
+            return new CommandResult(false, $"[L1 CONFLICT] {meta.UserId}: Expected v{meta.ExpectedVersion}, found v{currentVersion}");
+
+        // 2. APPLY DOMAIN LOGIC
+        var newState = applyFunc(state ?? new ShoppingCart { Id = cartId });
+
+        // 3. PERSISTENT SHADOW UPDATE (L2)
+        // We use the same Batch logic to ensure L2 stays in sync
         using var db = new SqliteConnection(_connectionString);
         await db.OpenAsync();
 
-        // 1. Fetch current state
-        var current = await db.QueryFirstOrDefaultAsync<ShoppingCart>(
-            "SELECT * FROM Carts WHERE Id = @cartId", new { cartId });
-
-        int currentVersion = current?.Version ?? 0;
-
-        // 2. Concurrency Check
-        if (meta.ExpectedVersion != currentVersion)
-        {
-            return new CommandResult(false, 
-                $"[CONFLICT] {meta.UserId}: Expected v{meta.ExpectedVersion}, found v{currentVersion}");
-        }
-
-        var newState = applyFunc(current ?? new ShoppingCart { Id = cartId });
-
-        // 3. BATCH SQL WITH UPSERT
-        // We use INSERT...ON CONFLICT (UPSERT) to handle both initial creation and updates.
-        // The 'WHERE' clause on the update ensures the version check is respected.
         var sqlBatch = @"
             INSERT INTO Carts (Id, Version, IsCancelled, Total) 
             VALUES (@Id, @Version, @IsCancelled, @Total)
             ON CONFLICT(Id) DO UPDATE SET 
-                Version = excluded.Version, 
-                IsCancelled = excluded.IsCancelled, 
-                Total = excluded.Total
+                Version = excluded.Version, IsCancelled = excluded.IsCancelled, Total = excluded.Total
             WHERE Carts.Version = @ExpectedVersion;
 
             INSERT INTO CartEvents (CartId, EventType, Payload, Metadata)
             SELECT @Id, @Type, @Payload, @Meta
-            WHERE (SELECT changes()) = 1;
-        ";
+            WHERE (SELECT changes()) = 1;";
 
         var affectedRows = await db.ExecuteAsync(sqlBatch, new {
-            Id = newState.Id,
-            Version = newState.Version,
-            IsCancelled = newState.IsCancelled,
-            Total = newState.Total,
-            ExpectedVersion = meta.ExpectedVersion, 
-            Type = eventType,
-            Payload = JsonSerializer.Serialize(payload),
-            Meta = JsonSerializer.Serialize(meta)
+            Id = newState.Id, Version = newState.Version, IsCancelled = newState.IsCancelled, Total = newState.Total,
+            ExpectedVersion = meta.ExpectedVersion, Type = eventType,
+            Payload = JsonSerializer.Serialize(payload), Meta = JsonSerializer.Serialize(meta)
         });
 
         if (affectedRows >= 1) 
         {
-            return new CommandResult(true, 
-                $"[SUCCESS] {meta.UserId} batched {eventType} (v{newState.Version})");
+            // 4. UPDATE L1 CACHE on successful L2 persistence
+            _l1Cache[cartId] = newState;
+            return new CommandResult(true, $"[SUCCESS] {meta.UserId} (L1 + L2 Synced) v{newState.Version}");
         }
 
-        return new CommandResult(false, $"[CONCURRENCY ERROR] {meta.UserId}: State was modified.");
+        return new CommandResult(false, $"[L2 SHADOW ERROR] {meta.UserId}: Persistence mismatch.");
     }
 }
 
-// --- APPLICATION LAYER ---
+// --- APP LAYER ---
 class Program
 {
     static async Task Main()
     {
-        SqlMapper.AddTypeHandler(new GuidTypeHandler());
-
-        var store = new SqlEventStore();
+        var store = new HybridEventStore();
         await store.InitializeDatabase();
-        
         var cartId = Guid.NewGuid();
-        Console.WriteLine("=== PoC 3: SQL Backed Sync-Sourcing (Batch Mode) ===\n");
+        
+        Console.WriteLine("=== PoC 3: Hybrid Sync-Sourcing (L1 Memory + L2 Shadow DB) ===\n");
 
-        // Initialization now works because of the UPSERT logic
-        var initResult = await store.TryPersistEvent(
-            cartId, 
-            "CartCreated", 
-            new { }, 
-            new EventMetadata(Guid.NewGuid(), "System", 0), 
-            s => s with { Version = 1 });
-
-        if (!initResult.Success) throw new Exception(initResult.Message);
-
+        // Initialization
+        await store.TryPersistEvent(cartId, "CartCreated", new { }, new EventMetadata(Guid.NewGuid(), "System", 0), s => s with { Version = 1 });
         var initial = await store.GetCart(cartId);
-        if (initial == null) throw new Exception("Critical Error: Cart not found after creation.");
+        Console.WriteLine($"INITIALIZED: Cart {cartId} in L1 & L2 (v{initial!.Version})\n");
 
-        Console.WriteLine($"DB INITIALIZED: Cart {cartId} is at Version {initial.Version}\n");
-
+        // The Race: 10 workers hitting L1 first
         var workers = new List<Task<CommandResult>>();
         for (int i = 1; i <= 10; i++)
         {
             int id = i;
-            workers.Add(Task.Run(() => 
-                store.TryPersistEvent(
-                    cartId, 
-                    "StatusUpdated", 
-                    new { Reason = "Race" }, 
-                    new EventMetadata(Guid.NewGuid(), $"Worker-{id:D2}", initial.Version), 
-                    s => s with { IsCancelled = true, Version = s.Version + 1 })
-            ));
+            workers.Add(Task.Run(() => store.TryPersistEvent(
+                cartId, "Update", new { i }, new EventMetadata(Guid.NewGuid(), $"Worker-{id:D2}", initial.Version), 
+                s => s with { Version = s.Version + 1 })));
         }
 
         var results = await Task.WhenAll(workers);
@@ -178,8 +144,6 @@ class Program
         Console.ResetColor();
 
         var final = await store.GetCart(cartId);
-        Console.WriteLine("\n" + new string('-', 60));
-        Console.WriteLine($"FINAL DB STATE: Version {final!.Version} | Cancelled: {final.IsCancelled}");
-        Console.WriteLine(new string('-', 60));
+        Console.WriteLine($"\nFINAL STATE: Version {final!.Version} (Verified in L1 Memory)");
     }
 }
