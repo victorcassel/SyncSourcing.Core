@@ -8,7 +8,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC1.BasicEventSourcing", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC2.SyncedCacheSourcing", "src\PoC2.SyncedCacheSourcing\PoC2.SyncedCacheSourcing.csproj", "{A5086E0E-626D-4B22-9BDD-4CF9D161500D}"
 EndProjectdotnet
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC3.SqlBackedSourcing", "src\PoC3.SqlBackedSourcing\PoC2.SqlBackedSourcing.csproj", "{D96E8C76-AA8F-4A4F-BE86-77D546FA6892}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PoC3.SqlBackedSourcing", "src\PoC3.SqlBackedSourcing\PoC3.SqlBackedSourcing.csproj", "{D96E8C76-AA8F-4A4F-BE86-77D546FA6892}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
