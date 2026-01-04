@@ -1,29 +1,27 @@
-# PoC 1: Advanced Event Sourced Shopping Cart
+# PoC 1: Basic Event Sourcing (Lean Architecture)
 
-### The Concept: Complex Domain & Data Privacy
-This stage establishes a production-grade domain model. We move beyond simple state changes to handle complex lists and **GDPR-sensitive data classification**.
+This project demonstrates the core principles of Event Sourcing with a focus on **pure business data**. It establishes a "Replay-only" pattern where the application state is reconstructed from a chronological log of immutable events.
 
-### 🛡️ Data Classification & GDPR
-To ensure global compliance, the events are categorized by their data sensitivity:
+## Architectural Focus: Separation of Concerns
+To keep the domain model as lean as possible, we distinguish between **Business Data** and **Traceability Metadata**:
 
-1.  **Identity Domain:** Contains PII (Personally Identifiable Information) like Names and Social Security Numbers.
-2.  **Transactional Domain:** Contains business facts like order items and totals.
+* **Business Data (Event Payload):** Contains only what is necessary for the domain logic (e.g., `Price`, `Quantity`, `ProductID`).
+* **Metadata (Event Header):** Contains cross-cutting information like `CorrelationId`, `CausalityId`, and an optional `UserId` for audit trails. This ensures the domain logic isn't cluttered with "dead weight" data.
 
-In a future "Surgical Pruning" scenario, the Identity events can be scrubbed or anonymized without breaking the transactional history of the cart.
+## Key Features
+* **Audit-Ready:** Traceability is built into the metadata from day one.
+* **Pure Domain Events:** Events represent business facts, not database rows.
+* **State via Replay:** State is calculated on-the-fly by replaying the event stream ($O(n)$ complexity).
 
-### 🏗 Layered Architecture
-| Layer | Responsibility |
+## Business Data Overview
+| Event | Core Data Points |
 | :--- | :--- |
-| **Domain (Events)** | Categorized into Identity and Transactional streams. |
-| **Domain (State)** | Tracks `TotalNeedsRecalculation` to decouple item logic from financial logic. |
-| **Infrastructure** | Performs the Replay. Reconstructs state from the full event history. |
-| **Business Logic** | Orchestrates events, ensuring that sensitive info is captured early in the flow. |
+| **CartCreated** | Cart ID |
+| **UserAuthenticated** | External Identity ID, Full Name, Email |
+| **ItemAdded** | Product ID, Quantity, Price |
+| **TotalAmountUpdated** | New Total, Reason |
 
----
-
-### 🔄 Business Flow: Decoupled Calculations
-Instead of updating the total price automatically inside an "AddItem" event, we follow the best practice of emitting a separate `TotalAmountUpdated` event. This allows for complex tax/shipping logic to occur outside the core event storage.
-
+## Flow Visualization
 ```mermaid
 sequenceDiagram
     autonumber
@@ -33,25 +31,17 @@ sequenceDiagram
     participant St as ShoppingCart (State)
 
     U->>S: CreateCart(Guid)
-    S->>M: AddEvent(CartCreated)
-    Note right of St: State initialized with ID
+    S->>M: AddEvent(CartCreated + Metadata)
+    Note right of St: State initialized
 
     U->>S: Authenticate(Name, Email)
-    S->>M: AddEvent(UserAuthenticated)
+    S->>M: AddEvent(UserAuthenticated + Metadata)
     
-    U->>S: CollectInfo(ID Number, Address)
-    S->>M: AddEvent(UserInfoCollected)
-    Note right of St: Customer info added to State
-
-    U->>S: AddItem("Laptop")
-    S->>M: AddEvent(ItemAdded)
-    Note right of St: Item added, TotalNeedsRecalculation = true
+    U->>S: AddItem("Camera")
+    S->>M: AddEvent(ItemAdded + Metadata)
+    Note right of St: TotalNeedsRecalculation = true
     
     Note over S: Logic triggers Recalculation
-    S->>M: AddEvent(TotalAmountUpdated)
-    Note right of St: TotalAmount set, TotalNeedsRecalculation = false
-
-    U->>S: RemoveItem(item2Id)
-    S->>M: AddEvent(ItemRemoved)
-    Note right of St: Item removed from list
+    S->>M: AddEvent(TotalAmountUpdated + Metadata)
+    Note right of St: TotalNeedsRecalculation = false
 ```
