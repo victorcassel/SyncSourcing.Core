@@ -20,6 +20,11 @@ The demo simulates **10 concurrent workers** attempting to modify a Shopping Car
 * **The Winner:** The first worker to reach the engine finds that `ExpectedVersion (1) == CacheVersion (1)`. The update succeeds and the cache moves to Version 2.
 * **The Followers:** All subsequent workers fail. Even though they "thought" they had the right version, the engine detects that the state has moved on.
 
+![Memory Cached](../../docs/images/poc2-flow.svg)
+
+<details>
+<summary>View Mermaid Source Code</summary>
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -42,3 +47,5 @@ sequenceDiagram
     Note over C: Transaction Rollback
     C-->>W: [CONFLICT] Worker 07
 ```
+
+</details>

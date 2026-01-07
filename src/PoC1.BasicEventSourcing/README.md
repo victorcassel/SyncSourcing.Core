@@ -22,6 +22,11 @@ To keep the domain model as lean as possible, we distinguish between **Business 
 | **TotalAmountUpdated** | New Total, Reason |
 
 ## Flow Visualization
+![Basic Flow](../../docs/images/poc1-flow.svg)
+
+<details>
+<summary>View Mermaid Source Code</summary>
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -45,3 +50,4 @@ sequenceDiagram
     S->>M: AddEvent(TotalAmountUpdated + Metadata)
     Note right of St: TotalNeedsRecalculation = false
 ```
+</details>
