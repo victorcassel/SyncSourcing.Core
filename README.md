@@ -2,7 +2,11 @@
 
 This repository demonstrates a logical progression from traditional **Event Sourcing** to a high-performance, sharding-ready model called **"Sync-Sourcing."**
 
-![Architecture Evolution](docs/images/architecture-main.svg)
+<div align="center">
+  <a href="docs/images/architecture-main.svg">
+    <img src="docs/images/architecture-main.svg" alt="Architecture Evolution" width="500">
+  </a>
+</div>
 
 ## 🏆 Portfolio Summary: The Hybrid Shadow-Persistence Model
 This project explores a solution for high-scale systems where "Replay Latency" is a bottleneck. By treating an **In-Memory Cache (L1)** as the primary Gatekeeper for concurrency and a **Database (L2)** as a persistent Shadow, we achieve sub-millisecond validation with 100% data durability.
